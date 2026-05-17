@@ -85,12 +85,12 @@ def _load_op_support(csv_path: str) -> OpSupport:
 
 @dataclass
 class Partition:
-    kind: str  # 'NPU' | 'CPU'
+    kind: str  # 'delegated' | 'non_delegated'
     op_indices: Tuple[int, int]  # inclusive (start, end) in subgraph order
     op_count: int
     subgraph: str
     reason: Optional[str] = (
-        None  # CPU only: 'no_builder' | 'dynamic_shape' | 'unsupported_composite'
+        None  # non_delegated only: 'no_builder' | 'dynamic_shape' | 'unsupported_composite'
     )
     op_breakdown: Counter = field(default_factory=Counter)
 
@@ -160,7 +160,7 @@ def _partition_subgraph(
         nonlocal run_breakdown
         partitions.append(
             Partition(
-                kind="NPU" if run_eligible else "CPU",
+                kind="delegated" if run_eligible else "non_delegated",
                 op_indices=(ops[run_start]["index"], ops[end - 1]["index"]),
                 op_count=end - run_start,
                 subgraph=sg_name,
@@ -173,8 +173,8 @@ def _partition_subgraph(
     for i, op in enumerate(ops):
         eligible, reason = _classify_op(op, op_support, dynamic_indices)
 
-        # A CPU run continues only if the reason matches; different reasons
-        # become different partitions so the breakdown stays actionable.
+        # A non_delegated run continues only if the reason matches; different
+        # reasons become different partitions so the breakdown stays actionable.
         same_run = (
             run_eligible is not None
             and eligible == run_eligible
@@ -203,44 +203,48 @@ def _partition_subgraph(
 
 def _report_partition(result: PartitionResult) -> None:
     parts = result.partitions
-    npu = [p for p in parts if p.kind == "NPU"]
-    cpu = [p for p in parts if p.kind == "CPU"]
+    delegated = [p for p in parts if p.kind == "delegated"]
+    non_delegated = [p for p in parts if p.kind == "non_delegated"]
 
     print(f"Signature: {result.subgraph} ({result.total_ops} ops)")
-    print(f"  Partitions: {len(parts)} total - {len(npu)} NPU, {len(cpu)} CPU")
+    print(
+        f"  Partitions: {len(parts)} total, {len(delegated)} delegated, "
+        f"{len(non_delegated)} non_delegated"
+    )
 
-    if npu:
-        largest = max(npu, key=lambda p: p.op_count)
-        smallest = min(npu, key=lambda p: p.op_count)
-        avg = sum(p.op_count for p in npu) / len(npu)
+    if delegated:
+        largest = max(delegated, key=lambda p: p.op_count)
+        smallest = min(delegated, key=lambda p: p.op_count)
+        avg = sum(p.op_count for p in delegated) / len(delegated)
         print(
-            f"  Largest  NPU partition: {GREEN}{largest.op_count}{RESET} ops "
+            f"  Largest delegated partition: {GREEN}{largest.op_count}{RESET} ops "
             f"(ops {largest.op_indices[0]}-{largest.op_indices[1]})"
         )
         print(
-            f"  Smallest NPU partition: {RED}{smallest.op_count}{RESET} ops "
+            f"  Smallest delegated partition: {RED}{smallest.op_count}{RESET} ops "
             f"(ops {smallest.op_indices[0]}-{smallest.op_indices[1]})"
         )
-        print(f"  Mean     NPU partition: {avg:.1f} ops")
+        print(f"  Mean delegated partition: {avg:.1f} ops")
     else:
-        print(f"  {RED}No NPU partitions{RESET}")
+        print(f"  {RED}No delegated partitions{RESET}")
 
-    if cpu:
+    if non_delegated:
         by_reason: Dict[str, Counter] = defaultdict(Counter)
         reason_totals: Counter = Counter()
-        for p in cpu:
+        for p in non_delegated:
             reason_totals[p.reason] += p.op_count
             by_reason[p.reason].update(p.op_breakdown)
-        print("  CPU fallback breakdown:")
+        print("  Non-delegated breakdown:")
         for reason, total in reason_totals.most_common():
             ops_str = ", ".join(f"{n} x{c}" for n, c in by_reason[reason].most_common())
             print(f"    {RED}{reason}{RESET}: {total} ops [{ops_str}]")
 
 
 def _report_partitions(results: List[PartitionResult]) -> None:
-    for r in results:
+    for i, r in enumerate(results):
+        if i:
+            print()
         _report_partition(r)
-        print()
 
 
 # ---------------------------------------------------------------------------
@@ -263,10 +267,11 @@ def _report_seams(
     graph: Dict[str, Any],
     results: List[PartitionResult],
     context: int = 2,
-    kind: str = "CPU",
+    kind: str = "non_delegated",
 ) -> None:
-    """Print ops surrounding every CPU (or NPU) partition. Useful for diagnosing why a run split."""
+    """Print ops surrounding every partition of the given kind."""
     ops_by_sg = {sg["name"]: sg["ops"] for sg in graph["subgraphs"]}
+    first = True
 
     for r in results:
         ops = ops_by_sg[r.subgraph]
@@ -275,11 +280,14 @@ def _report_seams(
         if not targets:
             continue
 
-        print(f"=== Seams in {r.subgraph} ({len(targets)} {kind} partition(s)) ===")
+        if not first:
+            print()
+        first = False
+        print(f"Seams in {r.subgraph} ({len(targets)} {kind} partition(s))")
         for i, p in enumerate(r.partitions):
             if p.kind != kind:
                 continue
-            tag = f"Partition {i} ({p.kind}, {p.op_count} op{'s' if p.op_count != 1 else ''}"
+            tag = f"  Partition {i} ({p.kind}, {p.op_count} op{'s' if p.op_count != 1 else ''}"
             if p.reason:
                 tag += f", reason={p.reason}"
             print(tag + ")")
@@ -288,21 +296,20 @@ def _report_seams(
             end_pos = pos_by_idx[p.op_indices[1]]
 
             for j in range(max(0, start_pos - context), start_pos):
-                print(f"  prev: op {ops[j]['index']} {_fmt_op_oneline(ops[j])}")
+                print(f"    prev: op {ops[j]['index']} {_fmt_op_oneline(ops[j])}")
 
             inside = ops[start_pos : end_pos + 1]
             if len(inside) <= 2 * context + 1:
                 for op in inside:
-                    print(f"  {RED}>>>{RESET}  op {op['index']} {_fmt_op_oneline(op)}")
+                    print(f"    {RED}>>>{RESET}  op {op['index']} {_fmt_op_oneline(op)}")
             else:
                 for op in inside[:context]:
-                    print(f"  {RED}>>>{RESET}  op {op['index']} {_fmt_op_oneline(op)}")
+                    print(f"    {RED}>>>{RESET}  op {op['index']} {_fmt_op_oneline(op)}")
                 print(
-                    f"  {RED}>>>{RESET}  ... {len(inside) - 2 * context} more in this partition ..."
+                    f"    {RED}>>>{RESET}  ... {len(inside) - 2 * context} more in this partition ..."
                 )
                 for op in inside[-context:]:
-                    print(f"  {RED}>>>{RESET}  op {op['index']} {_fmt_op_oneline(op)}")
+                    print(f"    {RED}>>>{RESET}  op {op['index']} {_fmt_op_oneline(op)}")
 
             for j in range(end_pos + 1, min(len(ops), end_pos + 1 + context)):
-                print(f"  next: op {ops[j]['index']} {_fmt_op_oneline(ops[j])}")
-            print()
+                print(f"    next: op {ops[j]['index']} {_fmt_op_oneline(ops[j])}")

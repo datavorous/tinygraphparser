@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 import struct
+import sys
 from typing import Any, Dict, List
 
-GREEN = "\033[92m"
-RED = "\033[91m"
-RESET = "\033[0m"
+_TTY = sys.stdout.isatty()
+GREEN = "\033[92m" if _TTY else ""
+RED = "\033[91m" if _TTY else ""
+RESET = "\033[0m" if _TTY else ""
 
 
 def _enum_map(module) -> Dict[int, str]:
