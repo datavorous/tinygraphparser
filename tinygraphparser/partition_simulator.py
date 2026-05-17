@@ -1,11 +1,13 @@
-"""Static partition simulator for the LiteRT QNN delegate.
+"""Static fragmentation analysis for the LiteRT QNN delegate.
 
-Predicts how a TFLite graph would be split into NPU vs CPU partitions, using:
-  - opSupportMap.csv      : which TFLite ops have a QNN builder
-  - find_dynamic_shape_ops: which ops have runtime shape/index inputs
+Checks two statically visible blockers per op:
+  - opSupportMap.csv      : whether a QNN builder exists for the op
+  - find_dynamic_shape_ops: whether shape/index inputs are runtime tensors
+
+Does NOT check dtype constraints, attribute constraints, or
+backendValidateOpConfig. Real runtime partitioning may differ.
 
 A partition is a maximal contiguous run of ops with the same eligibility.
-Many small NPU partitions = bad (dispatch overhead). A few large ones = good.
 """
 from __future__ import annotations
 
@@ -76,6 +78,9 @@ def load_op_support(csv_path: str) -> OpSupport:
                     if m:
                         out.composite_supported.add(m.group(1))
                 else:
+                    # composite_supported per-name is not consulted during
+                    # classification; composite handling here is coarser than
+                    # real QNN dispatch.
                     out.tfl_supported.add("STABLEHLO_COMPOSITE")
                     out.tfl_supported.add("SHLO_COMPOSITE")
     return out
@@ -106,6 +111,7 @@ _COMPOSITE_NAMES = ("STABLEHLO_COMPOSITE", "SHLO_COMPOSITE")
 
 
 def _classify_op(op: Dict[str, Any], op_support: OpSupport, dynamic_indices: Set[int]) -> Tuple[bool, Optional[str]]:
+    # Only checks builder presence and dynamic shape; dtype and attribute constraints are not modeled.
     if op["index"] in dynamic_indices:
         return False, "dynamic_shape"
 
@@ -121,7 +127,7 @@ def _classify_op(op: Dict[str, Any], op_support: OpSupport, dynamic_indices: Set
 
 
 def simulate_partition(graph: Dict[str, Any], op_support: OpSupport) -> List[PartitionResult]:
-    """Simulate QNN delegate partitioning. Returns one PartitionResult per subgraph."""
+    """Classify ops by static eligibility. Returns one PartitionResult per subgraph."""
     dyn_by_sg: Dict[str, Set[int]] = defaultdict(set)
     for d in find_dynamic_shape_ops(graph):
         dyn_by_sg[d["subgraph"]].add(d["op_index"])

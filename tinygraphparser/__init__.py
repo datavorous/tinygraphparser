@@ -1,4 +1,4 @@
-"""tinygraphparser - inspect TFLite / LiteRT-LM graphs and predict QNN partitioning."""
+"""tinygraphparser - inspect TFLite / LiteRT-LM graphs and detect statically visible QNN delegate blockers."""
 from .graph_parser import (
     TFLiteGraphParser,
     LiteRTLMExtractor,
