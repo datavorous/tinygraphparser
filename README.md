@@ -70,7 +70,7 @@ report_op_histogram(graph, top=10)
 
 ## Dynamic shape detection
 
-For each op in a fixed slot table (`_SHAPE_INDEX_SLOTS`), checks the input slot that carries shape or index data. Two failure modes: `runtime` — the tensor has no backing buffer so the shape is only known at runtime; `inferred_dim` — the buffer exists but contains `-1` (RESHAPE only), meaning the shape is partially computed. Both prevent static memory layout resolution on the NPU.
+For each op in a fixed slot table (`_SHAPE_INDEX_SLOTS`), checks the input slot that carries shape or index data. Two failure modes: `runtime` (the tensor has no backing buffer so the shape is only known at runtime) and `inferred_dim` (the buffer exists but contains `-1`, RESHAPE only, meaning the shape is partially computed). Both prevent static memory layout resolution on the NPU.
 
 ```python
 from tinygraphparser import report_dynamic_shape_ops
@@ -84,7 +84,7 @@ Checked ops: `RESHAPE`, `PAD`, `PADV2`, `MIRROR_PAD`, `STRIDED_SLICE`, `SLICE`, 
 
 ## Partition simulation
 
-For each op, eligibility = `opname in opSupportMap` AND `op not flagged by find_dynamic_shape_ops`. Ops are walked linearly; a new partition is flushed whenever eligibility changes or the CPU fallback reason changes (so `no_builder` and `dynamic_shape` runs are never merged). The largest NPU partition size is the headline health metric — one large partition means one delegate dispatch.
+For each op, eligibility = `opname in opSupportMap` AND `op not flagged by find_dynamic_shape_ops`. Ops are walked linearly; a new partition is flushed whenever eligibility changes or the CPU fallback reason changes (so `no_builder` and `dynamic_shape` runs are never merged). The largest NPU partition size is the headline health metric: one large partition means one delegate dispatch.
 
 ```python
 from tinygraphparser import load_op_support, simulate_partition, report_partitions
@@ -112,7 +112,7 @@ report_seams(graph, partitions, context=2, kind="CPU")
 
 ## Predicted vs actual
 
-Expands each partition's `op_indices` range into a set of individual op indices, then intersects with `actual["cpu_op_indices"]`. `divergent_ops` = predicted NPU but actually CPU — these point to per-op dtype/shape constraints or SDK-level rejections that the static simulator doesn't model. `agreement` is the fraction of ops where both verdicts match.
+Expands each partition's `op_indices` range into a set of individual op indices, then intersects with `actual["cpu_op_indices"]`. `divergent_ops` = predicted NPU but actually CPU; these point to per-op dtype/shape constraints or SDK-level rejections that the static simulator doesn't model. `agreement` is the fraction of ops where both verdicts match.
 
 ```python
 from tinygraphparser import compare_to_actual, report_comparison

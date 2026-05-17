@@ -120,7 +120,7 @@ class TFLiteGraphParser:
 
 
 # ---------------------------------------------------------------------------
-# .litertlm extractor — heuristic scan for embedded TFL3 blobs
+# .litertlm extractor: heuristic scan for embedded TFL3 blobs
 # ---------------------------------------------------------------------------
 
 class LiteRTLMExtractor:
@@ -323,7 +323,7 @@ def report_op_histogram(graph: Dict[str, Any], top: int | None = None) -> None:
     count_w = len(str(max_count))
     bar_width = 36
 
-    print(f"Op histogram — {graph['path']}  (total ops: {total})")
+    print(f"Op histogram  {graph['path']}  (total ops: {total})")
     for name, count, dtypes in hist:
         bar = "█" * round(count / max_count * bar_width)
         pct = count / total * 100

@@ -158,7 +158,7 @@ def _partition_subgraph(sg_name: str, ops: List[Dict[str, Any]],
     for i, op in enumerate(ops):
         eligible, reason = _classify_op(op, op_support, dynamic_indices)
 
-        # A CPU run continues only if the reason matches — different reasons
+        # A CPU run continues only if the reason matches; different reasons
         # become different partitions so the breakdown stays actionable.
         same_run = (run_eligible is not None and eligible == run_eligible
                     and (eligible or reason == run_reason))
