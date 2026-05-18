@@ -157,6 +157,8 @@ class Runtime:
                 "global": {
                     "error_codes": dict(self._analyser._global_error_hist),
                     "rejected_op_types": dict(self._analyser._global_type_hist),
+                    "partition_summaries": self._analyser._partition_summaries,
+                    "dtype_rejection_patterns": self._analyser._dtype_rejection_patterns,
                 },
             }
         )

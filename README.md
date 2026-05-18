@@ -29,35 +29,6 @@ For `.litertlm` files:
 s = Static.from_litertlm("model.litertlm", "datasets/opSupportMap.csv")
 ```
 
-Expected output (first signature only):
-
-```
-Rank violations
-No rank violations found in models/qwen.tflite
-
-Dynamic shape / index inputs
-4 fragmentation candidate(s) in models/qwen.tflite
-  [  17] GATHER_ND  (subgraph: decode)
-         slot 1 (indices): RUNTIME  ai_edge_torch.generative.utilities.co...  INT64  [1, 1]
-  [  54] RESHAPE  (subgraph: decode)
-         slot 1 (new_shape): RUNTIME  arith.constant204  INT32  [0]
-
-Cross-signature divergence
-1 cross-signature divergence candidate(s) in models/qwen.tflite
-  [  17] GATHER_ND  appears in 2 subgraph(s)
-         decode
-         prefill_128
-
-Partition simulation
-Signature: decode (1326 ops)
-  Partitions: 5 total, 3 delegated, 2 non_delegated
-  Largest delegated partition: 1271 ops (ops 55-1325)
-  Smallest delegated partition: 17 ops (ops 0-16)
-  Mean delegated partition: 441.3 ops
-  Non-delegated breakdown:
-    dynamic_shape: 2 ops [GATHER_ND x1, RESHAPE x1]
-```
-
 ### Runtime
 
 ```python
@@ -74,54 +45,36 @@ r = Runtime(
 r.report()
 data = r.json()
 ```
+<img src="media/2.png">
 
-Expected output:
 
-```
-Signature: decode
-  Non-delegated original ops: 125
-  Top non-delegated op types:
-      121  FULLY_CONNECTED
-        1  EMBEDDING_LOOKUP
-        1  GREATER_EQUAL
-        1  LESS_EQUAL
-        1  GATHER_ND
+| Op | Category |
+|---|---|
+| FULLY_CONNECTED | Export fix (quantization) |
+| GATHER_ND | Export fix (INT64 to INT32) |
+| GATHER | Export fix (quant params) |
+| DYNAMIC_UPDATE_SLICE | Closed SDK |
+| ElementWiseSelect | Closed SDK |
+| EMBEDDING_LOOKUP | Investigate |
+| GREATER_EQUAL | Accept (cold path) |
+| LESS_EQUAL | Accept (cold path) |
 
-Signature: prefill_128
-  Non-delegated original ops: 168
-  Top non-delegated op types:
-      116  FULLY_CONNECTED
-       48  DYNAMIC_UPDATE_SLICE
-        1  EMBEDDING_LOOKUP
-        1  GREATER_EQUAL
-        1  LESS_EQUAL
-
-Global (log-derived)  -- not attributed to any subgraph
-  ValidateOp rejection codes:
-    3110  dtype_mismatch        586
-  Top rejected op types:
-      474  FullyConnected
-       96  ElementWiseSelect
-        8  ElementWiseBinary
-        4  Gather
-        4  GatherNd
-```
+Closed SDK :: Builder exists, `ConvertOp` runs, `ValidateOp` called, rejected with no diagnostic message. Nothing we can read statically or from logs tells us why. Qualcomm's `backendValidateOpConfig` for this op on SM8650 rejects it silently.
 
 Outputs written to `out=`:
-- `rewritten.tflite` — flatbuffer with DISPATCH_OP nodes
-- `run.log` — apply_plugin_main log
+- `rewritten.tflite`: flatbuffer with `DISPATCH_OP` nodes
+- `run.log`: `apply_plugin_main` log
 
 ## What it checks
 
-### Static (no SDK required)
+### Static
 - Missing QNN builder
 - Input rank exceeds QNN cap
 - Dynamic shape or index input
 - Inferred -1 dim (RESHAPE, PAD, BROADCAST_TO, TILE)
 - Cross-signature divergence
-- Dtype risk (FLOAT32 on FC/Gather — delegated only if quantized)
 
-### Runtime (requires LiteRT build + QNN SDK)
+### Runtime
 - Per-subgraph delegated/non_delegated op counts from rewritten flatbuffer
 - Global ValidateOp rejection codes from log (not per-subgraph)
 
